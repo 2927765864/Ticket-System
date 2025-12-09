@@ -236,17 +236,26 @@ public class ClientApp extends Application {
     }
 
     // 发送消息辅助方法
+    // 修复后的 sendMessage 方法 (client/ClientApp.java)
     private void sendMessage(Message msg) {
-        if (!isConnected) {
+        if (!isConnected || out == null) {
             log("未连接服务器！");
             return;
         }
+
+        // 使用新线程发送，防止卡死UI
         new Thread(() -> {
-            try {
-                out.writeObject(msg);
-                out.flush();
-            } catch (IOException e) {
-                e.printStackTrace();
+            // 【关键修改】加上 synchronized 锁
+            // 确保同一时间只有一个线程在操作 out 流，防止数据写乱
+            synchronized (out) {
+                try {
+                    out.writeObject(msg);
+                    out.flush(); // 这一步也很重要
+                    // System.out.println("DEBUG: 已发送 " + msg.getMsgType()); // 调试用
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    log("发送失败: " + e.getMessage());
+                }
             }
         }).start();
     }
