@@ -7,8 +7,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 票务管家 (最终完整版)
- * 职责：管理车次数据、处理锁票、支付、超时监控、以及票源供给
+ * 票务管家 (最终完整版 - 含退票功能)
+ * 职责：管理车次数据、处理锁票、支付、取消订单、超时监控、以及票源供给
  */
 public class TicketManager {
     private static TicketManager instance = new TicketManager();
@@ -47,7 +47,7 @@ public class TicketManager {
     public synchronized Order lockTicket(String trainId, int num, String clientNo) {
         if (num < 1 || num > 5) {
             System.out.println("❌ 锁票失败：非法购票数量 " + num + " (限制1~5人)");
-            return null; // 或者可以抛出一个异常
+            return null;
         }
 
         Train train = trainMap.get(trainId);
@@ -80,27 +80,46 @@ public class TicketManager {
     }
 
     /**
-     * 3. 动态增加车次/放票 (新增功能)
-     * 供票源系统调用
+     * 3. 取消订单 (退票/撤单) - [新增功能]
+     * 对应课件状态机 T4: 待支付 -> 已取消，并释放资源
+     */
+    public synchronized boolean cancelOrder(String orderId) {
+        Order order = orderMap.get(orderId);
+
+        // 只有“待支付”状态的订单可以被取消
+        if (order != null && order.getStatus() == Order.Status.PENDING) {
+            // 1. 修改状态
+            order.setStatus(Order.Status.CANCELLED);
+
+            // 2. 释放资源 (回滚余票)
+            Train train = trainMap.get(order.getTrainId());
+            if (train != null) {
+                train.setAvailableSeats(train.getAvailableSeats() + order.getTicketCount());
+            }
+
+            System.out.println("🗑️ 订单已取消！[订单:" + orderId + "] 票已释放，余票恢复。");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 4. 动态增加车次/放票
      */
     public synchronized void addTrain(Train newTrain) {
-        // 如果车次已存在，则是增加余票
         if (trainMap.containsKey(newTrain.getTrainId())) {
             Train oldTrain = trainMap.get(newTrain.getTrainId());
             int newSeats = oldTrain.getAvailableSeats() + newTrain.getAvailableSeats();
             oldTrain.setAvailableSeats(newSeats);
-            System.out.println("➕ 车次 [" + newTrain.getTrainId() + "] 余票增加 " + newTrain.getAvailableSeats() + " 张，当前总余票: " + newSeats);
+            System.out.println("➕ 车次 [" + newTrain.getTrainId() + "] 余票增加 " + newTrain.getAvailableSeats() + " 张");
         } else {
-            // 如果不存在，则是新开列车
             trainMap.put(newTrain.getTrainId(), newTrain);
-            System.out.println("🆕 新增车次 [" + newTrain.getTrainId() + "] " +
-                    newTrain.getStartStation() + "-" + newTrain.getEndStation() +
-                    " 初始票数:" + newTrain.getAvailableSeats());
+            System.out.println("🆕 新增车次 [" + newTrain.getTrainId() + "]");
         }
     }
 
     /**
-     * 4. 启动后台监控线程
+     * 5. 启动后台监控线程
      */
     private void startTimeoutMonitor() {
         Thread monitorThread = new Thread(() -> {
@@ -110,7 +129,6 @@ public class TicketManager {
                     long now = System.currentTimeMillis();
                     for (Order order : orderMap.values()) {
                         if (order.getStatus() == Order.Status.PENDING) {
-                            // 超过60秒未支付
                             if (now - order.getCreateTime().getTime() > 60 * 1000) {
                                 handleTimeout(order);
                             }

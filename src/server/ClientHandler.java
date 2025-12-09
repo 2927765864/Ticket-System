@@ -10,17 +10,17 @@ import java.io.ObjectOutputStream;
 import java.net.Socket;
 import java.util.Collection;
 
-/**
- * 客户端处理线程 (完整版)
- * 支持：连接、查票、锁票、支付、以及[加车]
- */
 public class ClientHandler extends Thread {
     private Socket socket;
     private ObjectInputStream in;
     private ObjectOutputStream out;
+    private TicketServer.ClientListener clientListener; // 监听器引用
+    private String currentClientId = null; // 记录当前连接的ID
 
-    public ClientHandler(Socket socket) {
+    // 构造函数接收监听器
+    public ClientHandler(Socket socket, TicketServer.ClientListener clientListener) {
         this.socket = socket;
+        this.clientListener = clientListener;
     }
 
     @Override
@@ -31,10 +31,21 @@ public class ClientHandler extends Thread {
 
             while (true) {
                 Message msg = (Message) in.readObject();
-                System.out.println(">>> 收到消息: " + msg.getMsgType() + " 来自 " + msg.getClientNo());
 
-                // 1. 连接
+                // 第一次收到消息时，记录下它的 ClientID
+                if (currentClientId == null && msg.getClientNo() != null) {
+                    currentClientId = msg.getClientNo();
+                }
+
+                // 1. 连接 (上线通知)
                 if (msg.getMsgType() == MessageType.CONNECT) {
+                    System.out.println(">>> 终端上线: " + currentClientId);
+
+                    // [关键] 通知界面：有个家伙上线了
+                    if (clientListener != null) {
+                        clientListener.onClientConnected(currentClientId);
+                    }
+
                     reply(MessageType.RESPONSE_SUCCESS, "欢迎连接票务系统！");
                 }
 
@@ -48,9 +59,9 @@ public class ClientHandler extends Thread {
                     reply(MessageType.RESPONSE_SUCCESS, sb.toString());
                 }
 
-                // 3. 锁票 (买票)
+                // 3. 锁票
                 else if (msg.getMsgType() == MessageType.LOCK_TICKET) {
-                    String payload = msg.getMsgPayload(); // "K303,2"
+                    String payload = msg.getMsgPayload();
                     String[] parts = payload.split(",");
                     if (parts.length == 2) {
                         String trainId = parts[0];
@@ -73,34 +84,36 @@ public class ClientHandler extends Thread {
                             success ? "支付成功" : "支付失败");
                 }
 
-                // 5. 加车 (新增功能 - 票源系统专用)
+                // 5. 取消订单 (保留上一步的功能)
+                else if (msg.getMsgType() == MessageType.CANCEL_ORDER) {
+                    boolean success = TicketManager.getInstance().cancelOrder(msg.getMsgPayload());
+                    reply(success ? MessageType.RESPONSE_SUCCESS : MessageType.RESPONSE_FAIL,
+                            success ? "订单已取消" : "取消失败");
+                }
+
+                // 6. 加车
                 else if (msg.getMsgType() == MessageType.ADD_TRAIN) {
-                    // payload格式: "车次,始发,终到,票数"
-                    String payload = msg.getMsgPayload();
-                    String[] parts = payload.split(",");
+                    String[] parts = msg.getMsgPayload().split(",");
                     if (parts.length == 4) {
-                        String trainId = parts[0];
-                        String start = parts[1];
-                        String end = parts[2];
-                        int seats = Integer.parseInt(parts[3]);
-
-                        Train newTrain = new Train(trainId, start, end, seats);
+                        Train newTrain = new Train(parts[0], parts[1], parts[2], Integer.parseInt(parts[3]));
                         TicketManager.getInstance().addTrain(newTrain);
-
-                        reply(MessageType.RESPONSE_SUCCESS, "车次 " + trainId + " 操作成功！");
-                    } else {
-                        reply(MessageType.RESPONSE_FAIL, "格式错误，应为: 车次,始发,终到,票数");
+                        reply(MessageType.RESPONSE_SUCCESS, "操作成功");
                     }
                 }
 
-                // 6. 断开
+                // 7. 断开
                 else if (msg.getMsgType() == MessageType.DISCONNECT) {
                     break;
                 }
             }
         } catch (Exception e) {
-            System.out.println("客户端断开: " + e.getMessage());
+            // 客户端异常断开
         } finally {
+            // [关键] 资源清理与下线通知
+            if (currentClientId != null && clientListener != null) {
+                clientListener.onClientDisconnected(currentClientId);
+                System.out.println(">>> 终端下线: " + currentClientId);
+            }
             try { if (socket != null) socket.close(); } catch (IOException e) { e.printStackTrace(); }
         }
     }

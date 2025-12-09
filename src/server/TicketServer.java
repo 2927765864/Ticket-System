@@ -6,17 +6,19 @@ import java.net.Socket;
 
 /**
  * 票务系统网络服务
- * 改造后：支持在一个独立线程中启动，避免卡死UI
+ * 升级点：增加了 ClientListener 接口，用于通知界面更新在线列表
  */
 public class TicketServer implements Runnable {
     private static final int PORT = 8888;
     private boolean isRunning = true;
 
-    // 一个简单的回调接口，用来把日志发给界面显示
     private LogCallback logCallback;
+    private ClientListener clientListener; // 新增：客户端状态监听器
 
-    public TicketServer(LogCallback callback) {
-        this.logCallback = callback;
+    // 构造函数：现在需要传入两个回调（日志回调 + 状态监听器）
+    public TicketServer(LogCallback logCallback, ClientListener clientListener) {
+        this.logCallback = logCallback;
+        this.clientListener = clientListener;
     }
 
     @Override
@@ -28,10 +30,10 @@ public class TicketServer implements Runnable {
 
             while (isRunning) {
                 Socket clientSocket = serverSocket.accept();
-                log("检测到新连接: " + clientSocket.getInetAddress());
+                log("检测到物理连接: " + clientSocket.getInetAddress());
 
-                // 启动接待员线程
-                ClientHandler handler = new ClientHandler(clientSocket);
+                // 将监听器传递给 Handler，让它去汇报具体是谁上线了
+                ClientHandler handler = new ClientHandler(clientSocket, clientListener);
                 handler.start();
             }
         } catch (IOException e) {
@@ -40,16 +42,21 @@ public class TicketServer implements Runnable {
         }
     }
 
-    // 辅助方法：打印日志到控制台 + 发送给界面
     private void log(String msg) {
-        System.out.println(msg); // 控制台同时也打印
+        System.out.println(msg);
         if (logCallback != null) {
             logCallback.onLog(msg);
         }
     }
 
-    // 定义回调接口
+    // 日志回调接口
     public interface LogCallback {
         void onLog(String message);
+    }
+
+    // [新增] 客户端状态监听接口
+    public interface ClientListener {
+        void onClientConnected(String clientId);     // 谁上线了
+        void onClientDisconnected(String clientId);  // 谁下线了
     }
 }
