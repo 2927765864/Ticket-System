@@ -2,17 +2,18 @@ package client;
 
 import common.Message;
 import common.MessageType;
-import common.Train;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
@@ -31,15 +32,17 @@ public class ClientApp extends Application {
     private final String CLIENT_ID = "Client-" + (int)(Math.random() * 1000);
 
     // 数据源
-    private ObservableList<Train> trainData = FXCollections.observableArrayList();
+    private ObservableList<TrainViewModel> trainData = FXCollections.observableArrayList();
     private ObservableList<LocalOrder> orderData = FXCollections.observableArrayList();
 
     // UI 组件
-    private TableView<Train> trainTable;
+    private TableView<TrainViewModel> trainTable;
     private TableView<LocalOrder> orderTable;
     private TextArea logArea;
-    private DatePicker datePicker;
-    private ComboBox<String> seatTypeCombo;
+
+    // 控件
+    private DatePicker datePicker;      // 放在顶部，作为全局筛选
+    private ComboBox<String> seatCombo; // 放在底部，作为购票参数
     private TextField numField;
 
     public static void main(String[] args) { launch(args); }
@@ -51,97 +54,135 @@ public class ClientApp extends Application {
         BorderPane root = new BorderPane();
         root.setPadding(new Insets(10));
 
-        // 1. 顶部：连接与查询
-        HBox topBox = new HBox(10);
+        // ==========================================
+        // 1. 顶部区域：连接 + 核心筛选 (日期)
+        // ==========================================
+        HBox topBox = new HBox(15);
         topBox.setPadding(new Insets(0, 0, 10, 0));
+        topBox.setAlignment(Pos.CENTER_LEFT);
+
         Button btnConnect = new Button("连接服务器");
+        btnConnect.setStyle("-fx-background-color: #1890ff; -fx-text-fill: white;");
         btnConnect.setOnAction(e -> connectToServer());
-        Button btnRefresh = new Button("查询车票");
-        btnRefresh.setOnAction(e -> sendQuery());
-        topBox.getChildren().addAll(btnConnect, btnRefresh);
+
+        // 日期选择器 (默认今天)
+        datePicker = new DatePicker(LocalDate.now());
+        datePicker.setPrefWidth(120);
+        // 选中日期后，虽然可以自动刷新，但为了防止频繁请求，建议配合查询按钮使用
+        // datePicker.setOnAction(e -> sendQuery());
+
+        Button btnQuery = new Button("🔍 查询余票");
+        btnQuery.setStyle("-fx-font-weight: bold;");
+        btnQuery.setOnAction(e -> sendQuery());
+
+        topBox.getChildren().addAll(btnConnect, new Label("出发日期:"), datePicker, btnQuery);
         root.setTop(topBox);
 
-        // 2. 中间 SplitPane
+        // ==========================================
+        // 2. 中间区域：车次表 & 订单表
+        // ==========================================
         SplitPane centerSplit = new SplitPane();
         centerSplit.setOrientation(javafx.geometry.Orientation.VERTICAL);
 
-        // 车票列表
+        // 2.1 车次列表
         VBox trainBox = new VBox(5);
-        trainBox.getChildren().add(new Label("车次列表 (选中一行抢票):"));
+        trainBox.getChildren().add(new Label("车次列表 (请选择一趟列车):"));
         trainTable = new TableView<>();
-        setupTrainTable(); // 初始化表格列
+        setupTrainTable();
         trainTable.setItems(trainData);
+        VBox.setVgrow(trainTable, Priority.ALWAYS); // 让表格填满空间
         trainBox.getChildren().add(trainTable);
 
-        // 订单列表
+        // 2.2 我的订单
         VBox orderBox = new VBox(5);
         orderBox.getChildren().add(new Label("我的订单 (实时状态监控):"));
         orderTable = new TableView<>();
         setupOrderTable();
         orderTable.setItems(orderData);
+        VBox.setVgrow(orderTable, Priority.ALWAYS);
         orderBox.getChildren().add(orderTable);
 
         centerSplit.getItems().addAll(trainBox, orderBox);
-        centerSplit.setDividerPositions(0.5);
+        centerSplit.setDividerPositions(0.6); // 车次表占60%高度
         root.setCenter(centerSplit);
 
-        // 3. 底部
+        // ==========================================
+        // 3. 底部区域：购票操作 & 订单操作
+        // ==========================================
         VBox bottomBox = new VBox(10);
         bottomBox.setPadding(new Insets(10, 0, 0, 0));
 
-        // 参数选择
-        HBox paramBox = new HBox(10);
-        datePicker = new DatePicker(LocalDate.now());
-        datePicker.setPrefWidth(120);
-        seatTypeCombo = new ComboBox<>();
-        seatTypeCombo.getItems().addAll("二等座", "一等座", "商务座");
-        seatTypeCombo.getSelectionModel().selectFirst();
+        // 3.1 购票参数行
+        HBox buyBox = new HBox(15);
+        buyBox.setAlignment(Pos.CENTER_LEFT);
+
+        seatCombo = new ComboBox<>();
+        seatCombo.getItems().addAll("二等座", "一等座", "商务座", "硬座", "硬卧", "软卧", "无座");
+        seatCombo.getSelectionModel().selectFirst();
+        seatCombo.setPrefWidth(100);
+
         numField = new TextField("1");
         numField.setPrefWidth(50);
-        Button btnBuy = new Button("立即抢票");
-        btnBuy.setStyle("-fx-background-color: #ff4d4f; -fx-text-fill: white;");
-        btnBuy.setOnAction(e -> handleBuyAction());
-        paramBox.getChildren().addAll(new Label("日期:"), datePicker, new Label("席位:"), seatTypeCombo, new Label("人数:"), numField, btnBuy);
 
-        // 订单操作
-        HBox actionBox = new HBox(10);
+        Button btnBuy = new Button("立即抢票");
+        btnBuy.setStyle("-fx-background-color: #ff4d4f; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14px;");
+        btnBuy.setOnAction(e -> handleBuyAction());
+
+        buyBox.getChildren().addAll(
+                new Label("席位类型:"), seatCombo,
+                new Label("乘车人数:"), numField,
+                btnBuy
+        );
+
+        // 3.2 订单操作行
+        HBox orderActionBox = new HBox(15);
+        orderActionBox.setAlignment(Pos.CENTER_LEFT);
+
         Button btnPay = new Button("支付选中订单");
         btnPay.setStyle("-fx-background-color: #52c41a; -fx-text-fill: white;");
         btnPay.setOnAction(e -> handleOrderAction(true));
-        Button btnCancel = new Button("取消选中订单");
+
+        Button btnCancel = new Button("取消/退票");
         btnCancel.setStyle("-fx-background-color: #faad14; -fx-text-fill: white;");
         btnCancel.setOnAction(e -> handleOrderAction(false));
-        actionBox.getChildren().addAll(btnPay, btnCancel);
 
+        orderActionBox.getChildren().addAll(btnPay, btnCancel);
+
+        // 3.3 日志
         logArea = new TextArea();
-        logArea.setPrefHeight(80);
+        logArea.setPrefHeight(60); // 日志可以矮一点
         logArea.setEditable(false);
+        logArea.setWrapText(true);
 
-        bottomBox.getChildren().addAll(new Separator(), paramBox, actionBox, new Label("日志:"), logArea);
+        bottomBox.getChildren().addAll(new Separator(), buyBox, orderActionBox, new Label("系统日志:"), logArea);
         root.setBottom(bottomBox);
 
+        // ==========================================
+        // 启动逻辑
+        // ==========================================
         primaryStage.setOnCloseRequest(e -> disconnect());
-        Scene scene = new Scene(root, 650, 700);
+        Scene scene = new Scene(root, 700, 750);
         primaryStage.setScene(scene);
         primaryStage.show();
 
+        // 自动连接
         connectToServer();
     }
 
-    // --- 表格初始化 (仅保留这一个版本) ---
+    // --- 表格设置 ---
+
     private void setupTrainTable() {
-        TableColumn<Train, String> idCol = new TableColumn<>("车次");
-        idCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getTrainId()));
+        TableColumn<TrainViewModel, String> idCol = new TableColumn<>("车次");
+        idCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getId()));
+        idCol.setPrefWidth(80);
 
-        TableColumn<Train, String> routeCol = new TableColumn<>("区间");
-        // 我们在解析时把 "北京-上海" 存入了 startStation 字段 (临时借用)
-        routeCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getStartStation()));
+        TableColumn<TrainViewModel, String> routeCol = new TableColumn<>("区间");
+        routeCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getRoute()));
+        routeCol.setPrefWidth(120);
 
-        TableColumn<Train, String> infoCol = new TableColumn<>("余票详情");
-        // 我们在解析时把 "{二等座=100...}" 存入了 endStation 字段 (临时借用)
-        infoCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getEndStation()));
+        TableColumn<TrainViewModel, String> infoCol = new TableColumn<>("在该日期的余票详情");
+        infoCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().getSeatsInfo()));
 
-        trainTable.getColumns().clear();
         trainTable.getColumns().addAll(idCol, routeCol, infoCol);
         trainTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
     }
@@ -149,33 +190,140 @@ public class ClientApp extends Application {
     private void setupOrderTable() {
         TableColumn<LocalOrder, String> idCol = new TableColumn<>("订单号");
         idCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().orderId));
-        TableColumn<LocalOrder, String> tCol = new TableColumn<>("车次");
-        tCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().trainId));
-        TableColumn<LocalOrder, String> dCol = new TableColumn<>("详情");
-        dCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().detail));
-        TableColumn<LocalOrder, String> sCol = new TableColumn<>("状态");
-        sCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().status));
 
-        sCol.setCellFactory(c -> new TableCell<LocalOrder,String>(){
-            @Override protected void updateItem(String item, boolean empty){
+        TableColumn<LocalOrder, String> infoCol = new TableColumn<>("订单详情");
+        infoCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().detail));
+
+        TableColumn<LocalOrder, String> statusCol = new TableColumn<>("状态");
+        statusCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().status));
+        statusCol.setCellFactory(column -> new TableCell<LocalOrder, String>() {
+            @Override protected void updateItem(String item, boolean empty) {
                 super.updateItem(item, empty);
-                if(empty||item==null){setText(null);setStyle("");}
-                else{
+                if (empty || item == null) {
+                    setText(null); setStyle("");
+                } else {
                     setText(item);
-                    if(item.equals("PENDING")) setStyle("-fx-text-fill:orange; -fx-font-weight:bold;");
-                    else if(item.equals("PAID")) setStyle("-fx-text-fill:green; -fx-font-weight:bold;");
-                    else setStyle("-fx-text-fill:gray;");
+                    if ("PENDING".equals(item)) setStyle("-fx-text-fill: orange; -fx-font-weight: bold;");
+                    else if ("PAID".equals(item)) setStyle("-fx-text-fill: green; -fx-font-weight: bold;");
+                    else setStyle("-fx-text-fill: gray;");
                 }
             }
         });
 
-        orderTable.getColumns().addAll(idCol, tCol, dCol, sCol);
+        orderTable.getColumns().addAll(idCol, infoCol, statusCol);
         orderTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
     }
 
-    // --- 网络与逻辑 ---
+    // --- 业务逻辑 ---
+
+    private void sendQuery() {
+        if (!isConnected) return;
+        // 获取顶部选择的日期，发送给服务器
+        String selectedDate = datePicker.getValue().toString();
+        log("正在查询 " + selectedDate + " 的车票...");
+        sendMessage(new Message(CLIENT_ID, MessageType.QUERY_TICKETS, selectedDate));
+    }
+
+    private void handleBuyAction() {
+        TrainViewModel selected = trainTable.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            showAlert("请先在上方表格中选中一趟车次！");
+            return;
+        }
+
+        // 关键：使用的是顶部选择的日期
+        String date = datePicker.getValue().toString();
+        String seat = seatCombo.getValue();
+        String num = numField.getText();
+
+        if (!num.matches("[1-5]")) { showAlert("购票人数限制 1~5 人"); return; }
+
+        // 发送格式: "车次,人数,日期,席位"
+        String payload = String.format("%s,%s,%s,%s", selected.getId(), num, date, seat);
+        log("发起抢票: " + selected.getId() + " (" + seat + " x" + num + ")");
+        sendMessage(new Message(CLIENT_ID, MessageType.LOCK_TICKET, payload));
+    }
+
+    private void handleMessage(Message msg) {
+        if (msg.getMsgType() == MessageType.RESPONSE_SUCCESS) {
+            String content = msg.getMsgPayload();
+            // 根据内容判断是查询结果还是购票结果
+            if (content.contains("订单信息:")) {
+                parseAndAddOrder(content); // 购票成功，解析订单
+            } else if (content.contains("{") || content.contains("[该日期无票]")) {
+                updateTrainList(content);  // 查询结果，刷新表格
+                log("车票列表已刷新。");
+            } else {
+                log("系统提示: " + content);
+            }
+        } else if (msg.getMsgType() == MessageType.ORDER_UPDATE) {
+            // 推送更新
+            String[] parts = msg.getMsgPayload().split(",");
+            if (parts.length >= 2) updateOrderStatus(parts[0], parts[1]);
+        } else if (msg.getMsgType() == MessageType.RESPONSE_FAIL) {
+            showAlert("❌ " + msg.getMsgPayload());
+        }
+    }
+
+    // 解析服务器返回的 List<Train> 字符串
+    private void updateTrainList(String data) {
+        trainData.clear();
+        String[] lines = data.split("\n");
+        for (String line : lines) {
+            try {
+                // 格式: G101 (北京-上海) {二等座=100...}
+                if (!line.contains("(")) continue;
+
+                String id = line.split(" ")[0];
+                String route = line.substring(line.indexOf("(") + 1, line.indexOf(")"));
+                String seatsInfo;
+                if (line.contains("{")) {
+                    seatsInfo = line.substring(line.indexOf("{"));
+                } else {
+                    seatsInfo = "该日无票";
+                }
+
+                trainData.add(new TrainViewModel(id, route, seatsInfo));
+            } catch (Exception e) {}
+        }
+    }
+
+    private void parseAndAddOrder(String msg) {
+        try {
+            int s = msg.indexOf("[订单") + 3;
+            int e = msg.indexOf("]", s);
+            String oid = msg.substring(s, e);
+
+            // 构造一个本地显示的订单详情字符串
+            String detail = String.format("%s %s (%s %s张)",
+                    datePicker.getValue(), // 日期
+                    trainTable.getSelectionModel().getSelectedItem().getId(), // 车次
+                    seatCombo.getValue(), // 席位
+                    numField.getText());  // 人数
+
+            orderData.add(0, new LocalOrder(oid, detail, "PENDING"));
+        } catch (Exception e) {
+            log("订单创建成功，但解析显示出错，请查看日志。");
+        }
+    }
+
+    private void updateOrderStatus(String oid, String status) {
+        for (LocalOrder o : orderData) {
+            if (o.orderId.equals(oid)) {
+                o.status = status;
+                orderTable.refresh();
+                if ("PAID".equals(status)) log("✅ 订单 " + oid + " 支付成功！");
+                if ("TIMEOUT".equals(status)) log("⚠️ 订单 " + oid + " 已超时失效。");
+                if ("CANCELLED".equals(status)) log("🗑️ 订单 " + oid + " 已取消。");
+                break;
+            }
+        }
+    }
+
+    // --- 基础通信与工具 ---
+
     private void connectToServer() {
-        if(isConnected) return;
+        if (isConnected) return;
         new Thread(() -> {
             try {
                 socket = new Socket("127.0.0.1", 8888);
@@ -183,133 +331,61 @@ public class ClientApp extends Application {
                 in = new ObjectInputStream(socket.getInputStream());
                 isConnected = true;
                 sendMessage(new Message(CLIENT_ID, MessageType.CONNECT, "Login"));
-                sendQuery(); // 连上立刻查票
 
-                while(isConnected) {
+                // 连上后，自动查询当前日期
+                Platform.runLater(() -> sendQuery());
+
+                while (isConnected) {
                     Message msg = (Message) in.readObject();
                     Platform.runLater(() -> handleMessage(msg));
                 }
-            } catch(Exception e) { log("连接断开"); isConnected=false; }
+            } catch (Exception e) {
+                log("连接失败或断开: " + e.getMessage());
+                isConnected = false;
+            }
         }).start();
-    }
-
-    private void handleMessage(Message msg) {
-        if (msg.getMsgType() == MessageType.RESPONSE_SUCCESS) {
-            String content = msg.getMsgPayload();
-            if (content.contains("订单信息:")) { // 锁票成功
-                parseAndAddOrder(content);
-            } else if (content.contains("{") || content.contains("[该日期无票]")) { // 查票结果
-                updateTrainList(content);
-            } else {
-                log("系统: " + content);
-            }
-        } else if (msg.getMsgType() == MessageType.ORDER_UPDATE) {
-            String[] parts = msg.getMsgPayload().split(",");
-            if(parts.length >= 2) updateOrderStatus(parts[0], parts[1]);
-        } else if (msg.getMsgType() == MessageType.RESPONSE_FAIL) {
-            showAlert("❌ " + msg.getMsgPayload());
-        }
-    }
-
-    private void sendQuery() {
-        String date = datePicker.getValue() != null ? datePicker.getValue().toString() : "";
-        sendMessage(new Message(CLIENT_ID, MessageType.QUERY_TICKETS, date));
-    }
-
-    private void handleBuyAction() {
-        Train selected = trainTable.getSelectionModel().getSelectedItem();
-        if (selected == null) { showAlert("请先选车次"); return; }
-
-        String payload = String.format("%s,%s,%s,%s",
-                selected.getTrainId(), numField.getText(), datePicker.getValue(), seatTypeCombo.getValue());
-        sendMessage(new Message(CLIENT_ID, MessageType.LOCK_TICKET, payload));
-    }
-
-    private void updateTrainList(String data) {
-        trainData.clear();
-        String[] lines = data.split("\n");
-        for (String line : lines) {
-            try {
-                // 解析格式: G101 (北京-上海) {二等座=100...}
-                if (!line.contains("(")) continue;
-
-                String id = line.split(" ")[0];
-                String route = line.substring(line.indexOf("(") + 1, line.indexOf(")"));
-                String seats;
-                if (line.contains("{")) {
-                    seats = line.substring(line.indexOf("{"));
-                } else {
-                    seats = "无票";
-                }
-
-                // 借用 Train 的构造函数来存放 UI 显示数据
-                // id -> trainId, route -> startStation, seats -> endStation
-                Train t = new Train(id, route, seats);
-                trainData.add(t);
-            } catch(Exception e) {}
-        }
-    }
-
-    private void parseAndAddOrder(String msg) {
-        try {
-            int s = msg.indexOf("[订单")+3;
-            int e = msg.indexOf("]", s);
-            String oid = msg.substring(s, e);
-
-            // 简单解析车次ID (从msg中查找)
-            String tid = "未知车次";
-            if (msg.contains("G")) {
-                int idx = msg.indexOf("G");
-                // 简单尝试截取车次
-                if(msg.length() > idx+4) tid = msg.substring(idx, idx+4);
-            } else if (msg.contains("D") || msg.contains("K") || msg.contains("T")) {
-                // 模糊匹配
-                tid = "车次";
-            }
-
-            String detail = datePicker.getValue() + " " + seatTypeCombo.getValue() + " " + numField.getText() + "张";
-            orderData.add(0, new LocalOrder(oid, tid, detail, "PENDING"));
-        } catch (Exception e) {
-            log("订单解析失败，请查看日志");
-        }
-    }
-
-    private void updateOrderStatus(String oid, String status) {
-        for(LocalOrder o : orderData) {
-            if(o.orderId.equals(oid)) {
-                o.status = status;
-                orderTable.refresh();
-                break;
-            }
-        }
     }
 
     private void handleOrderAction(boolean isPay) {
         LocalOrder o = orderTable.getSelectionModel().getSelectedItem();
-        if(o==null) return;
-        sendMessage(new Message(CLIENT_ID, isPay?MessageType.PAY_ORDER:MessageType.CANCEL_ORDER, o.orderId));
+        if (o == null) { showAlert("请先选中一个订单！"); return; }
+        sendMessage(new Message(CLIENT_ID, isPay ? MessageType.PAY_ORDER : MessageType.CANCEL_ORDER, o.orderId));
     }
 
     private void sendMessage(Message msg) {
-        if(!isConnected) return;
-        new Thread(()->{
-            try {
-                synchronized(out){ out.writeObject(msg); out.flush(); }
-            } catch(Exception e){}
+        if (!isConnected) return;
+        new Thread(() -> {
+            synchronized (out) {
+                try { out.writeObject(msg); out.flush(); } catch (IOException e) {}
+            }
         }).start();
     }
 
-    private void log(String s) { Platform.runLater(()->logArea.appendText(s+"\n")); }
-    private void showAlert(String s) { Platform.runLater(()->new Alert(Alert.AlertType.WARNING, s).showAndWait()); }
-    private void disconnect() { try{if(socket!=null)socket.close();}catch(Exception e){} }
+    private void disconnect() { try { if (socket != null) socket.close(); } catch (IOException e) {} }
+    private void log(String s) { Platform.runLater(() -> logArea.appendText(s + "\n")); }
+    private void showAlert(String s) { Platform.runLater(() -> new Alert(Alert.AlertType.WARNING, s).showAndWait()); }
 
-    // 内部类：用于订单显示
+    // --- 内部数据模型类 ---
+
+    // 专门用于车次表格显示的模型
+    public static class TrainViewModel {
+        private final SimpleStringProperty id = new SimpleStringProperty();
+        private final SimpleStringProperty route = new SimpleStringProperty();
+        private final SimpleStringProperty seatsInfo = new SimpleStringProperty();
+
+        public TrainViewModel(String id, String route, String seatsInfo) {
+            this.id.set(id);
+            this.route.set(route);
+            this.seatsInfo.set(seatsInfo);
+        }
+        public String getId() { return id.get(); }
+        public String getRoute() { return route.get(); }
+        public String getSeatsInfo() { return seatsInfo.get(); }
+    }
+
+    // 专门用于订单表格显示的模型
     public static class LocalOrder {
-        String orderId; String trainId; String detail; String status;
-        public LocalOrder(String id, String t, String d, String s) { orderId=id; trainId=t; detail=d; status=s; }
-        public String getOrderId() { return orderId; }
-        public String getTrainId() { return trainId; }
-        public String getDetail() { return detail; }
-        public String getStatus() { return status; }
+        String orderId; String detail; String status;
+        public LocalOrder(String id, String d, String s) { orderId = id; detail = d; status = s; }
     }
 }

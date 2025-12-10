@@ -3,6 +3,7 @@ package common;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.TreeMap; // 使用 TreeMap 让日期自动排序
 
 public class Train implements Serializable {
     private static final long serialVersionUID = 1L;
@@ -11,9 +12,8 @@ public class Train implements Serializable {
     private String startStation;
     private String endStation;
 
-    // 核心库存结构：日期 -> (席位类型 -> 余票数量)
-    // 例如: "2025-12-01" -> { "二等座": 100, "商务座": 10 }
-    private Map<String, Map<String, Integer>> inventory = new HashMap<>();
+    // 改用 TreeMap，这样显示时日期会自动按顺序排列，不会乱跳
+    private Map<String, Map<String, Integer>> inventory = new TreeMap<>();
 
     public Train(String trainId, String startStation, String endStation) {
         this.trainId = trainId;
@@ -21,7 +21,7 @@ public class Train implements Serializable {
         this.endStation = endStation;
     }
 
-    // 增加/设置库存
+    // 增加库存
     public void addTickets(String date, String type, int num) {
         inventory.putIfAbsent(date, new HashMap<>());
         Map<String, Integer> dailyMap = inventory.get(date);
@@ -29,13 +29,13 @@ public class Train implements Serializable {
         dailyMap.put(type, current + num);
     }
 
-    // 获取特定日期、特定席位的余票
+    // 获取余票
     public int getTickets(String date, String type) {
         if (!inventory.containsKey(date)) return 0;
         return inventory.get(date).getOrDefault(type, 0);
     }
 
-    // 扣减库存 (返回是否成功)
+    // 扣减库存
     public boolean reduceTickets(String date, String type, int num) {
         int current = getTickets(date, type);
         if (current >= num) {
@@ -45,9 +45,27 @@ public class Train implements Serializable {
         return false;
     }
 
-    // 回滚/退票
+    // 回滚
     public void returnTickets(String date, String type, int num) {
         addTickets(date, type, num);
+    }
+
+    // [核心修改] 格式化库存信息，供界面显示
+    public String getFormattedInventory() {
+        if (inventory.isEmpty()) return "暂无排期";
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Map<String, Integer>> entry : inventory.entrySet()) {
+            String date = entry.getKey();
+            sb.append("📅 ").append(date).append(": "); // 加个图标好看点
+
+            Map<String, Integer> seats = entry.getValue();
+            for (Map.Entry<String, Integer> seat : seats.entrySet()) {
+                // 格式: 二等座(100)
+                sb.append(seat.getKey()).append("(").append(seat.getValue()).append(")  ");
+            }
+            sb.append("\n"); // 换行
+        }
+        return sb.toString();
     }
 
     // Getters
@@ -55,7 +73,7 @@ public class Train implements Serializable {
     public String getStartStation() { return startStation; }
     public String getEndStation() { return endStation; }
 
-    // 生成该车次在指定日期的摘要信息（用于发给客户端）
+    // toString (Client端解析用)
     public String toString(String date) {
         if (!inventory.containsKey(date)) {
             return trainId + " (" + startStation + "-" + endStation + ") [该日期无票]";
