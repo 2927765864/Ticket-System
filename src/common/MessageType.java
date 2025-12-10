@@ -6,22 +6,25 @@ package common;
  */
 public enum MessageType {
     // 基础消息
-    CONNECT(1),         // 客户端/票源系统连接/开机 [cite: 548]
+    CONNECT(1),         // 客户端/票源系统连接
     DISCONNECT(0),      // 断开连接
 
     // 业务消息 - 客户端发给服务端
-    QUERY_TICKETS(2),   // 查询车次
-    LOCK_TICKET(3),     // 锁定票源（下单）
+    QUERY_TICKETS(2),   // 查询车次 (Payload可带日期)
+    LOCK_TICKET(3),     // 锁定票源 (Payload包含日期席位)
     PAY_ORDER(4),       // 支付订单
     CANCEL_ORDER(5),    // 取消订单
 
     // 业务消息 - 服务端回发
     RESPONSE_SUCCESS(200), // 操作成功
-    RESPONSE_FAIL(500),    // 操作失败（如无票、系统错误）
-    DATA_UPDATE(6),        // 服务端推送的数据更新（如余票变化）
+    RESPONSE_FAIL(500),    // 操作失败
+    DATA_UPDATE(6),        // 服务端推送的数据更新
 
     // 票源系统消息
-    ADD_TRAIN(7);       // 增加车次/放票
+    ADD_TRAIN(7),       // 增加车次 (Payload包含日期席位)
+
+    // [新增] 订单状态更新通知 (服务端主动推送 -> 客户端)
+    ORDER_UPDATE(8);
 
     private int value;
 

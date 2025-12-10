@@ -1,72 +1,66 @@
 package common;
 
 import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
 
-/**
- * 列车实体类
- * 必须实现 Serializable 接口以便网络传输
- */
 public class Train implements Serializable {
     private static final long serialVersionUID = 1L;
 
-    private String trainId;     // 车次号
-    private String startStation;// 始发站
-    private String endStation;  // 终到站
-    private int totalSeats;     // 总席位
-    private int availableSeats; // 当前余票
+    private String trainId;
+    private String startStation;
+    private String endStation;
 
-    public Train(String trainId, String startStation, String endStation, int totalSeats) {
+    // 核心库存结构：日期 -> (席位类型 -> 余票数量)
+    // 例如: "2025-12-01" -> { "二等座": 100, "商务座": 10 }
+    private Map<String, Map<String, Integer>> inventory = new HashMap<>();
+
+    public Train(String trainId, String startStation, String endStation) {
         this.trainId = trainId;
         this.startStation = startStation;
         this.endStation = endStation;
-        this.totalSeats = totalSeats;
-        this.availableSeats = totalSeats; // 初始余票等于总票数
     }
 
-    // --- Getter 和 Setter 方法 (补全了) ---
-
-    public String getTrainId() {
-        return trainId;
+    // 增加/设置库存
+    public void addTickets(String date, String type, int num) {
+        inventory.putIfAbsent(date, new HashMap<>());
+        Map<String, Integer> dailyMap = inventory.get(date);
+        int current = dailyMap.getOrDefault(type, 0);
+        dailyMap.put(type, current + num);
     }
 
-    public void setTrainId(String trainId) {
-        this.trainId = trainId;
+    // 获取特定日期、特定席位的余票
+    public int getTickets(String date, String type) {
+        if (!inventory.containsKey(date)) return 0;
+        return inventory.get(date).getOrDefault(type, 0);
     }
 
-    public String getStartStation() {
-        return startStation;
+    // 扣减库存 (返回是否成功)
+    public boolean reduceTickets(String date, String type, int num) {
+        int current = getTickets(date, type);
+        if (current >= num) {
+            inventory.get(date).put(type, current - num);
+            return true;
+        }
+        return false;
     }
 
-    public void setStartStation(String startStation) {
-        this.startStation = startStation;
+    // 回滚/退票
+    public void returnTickets(String date, String type, int num) {
+        addTickets(date, type, num);
     }
 
-    public String getEndStation() {
-        return endStation;
-    }
+    // Getters
+    public String getTrainId() { return trainId; }
+    public String getStartStation() { return startStation; }
+    public String getEndStation() { return endStation; }
 
-    public void setEndStation(String endStation) {
-        this.endStation = endStation;
-    }
-
-    public int getTotalSeats() {
-        return totalSeats;
-    }
-
-    public void setTotalSeats(int totalSeats) {
-        this.totalSeats = totalSeats;
-    }
-
-    public int getAvailableSeats() {
-        return availableSeats;
-    }
-
-    public void setAvailableSeats(int availableSeats) {
-        this.availableSeats = availableSeats;
-    }
-
-    @Override
-    public String toString() {
-        return trainId + " (" + startStation + "-" + endStation + ") 余票:" + availableSeats;
+    // 生成该车次在指定日期的摘要信息（用于发给客户端）
+    public String toString(String date) {
+        if (!inventory.containsKey(date)) {
+            return trainId + " (" + startStation + "-" + endStation + ") [该日期无票]";
+        }
+        Map<String, Integer> seats = inventory.get(date);
+        return String.format("%s (%s-%s) %s", trainId, startStation, endStation, seats.toString());
     }
 }
